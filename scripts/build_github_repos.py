@@ -6,6 +6,8 @@ import os
 import sys
 import base64
 import time
+import re
+import argparse
 from datetime import datetime, timedelta
 
 REPO_DIR = os.environ.get("GITHUB_WORKSPACE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,6 +18,12 @@ CACHE_FILE = os.path.join(DATA_DIR, "github_repos_cache.json")
 NEW_REPOS_FILE = os.path.join(DATA_DIR, "github_repos_new.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
+
+parser = argparse.ArgumentParser(description="Build GitHub repos dashboard page with live data from GitHub API.")
+parser.add_argument("--fast", action="store_true", help="Reuse cached commit and README details.")
+parser.add_argument("--owner", default=os.environ.get("GITHUB_REPO_OWNER"), help="GitHub owner login to include, for example dogebi.")
+args = parser.parse_args()
+OWNER = args.owner
 
 # Category mapping
 CATEGORY_MAP = {}
@@ -126,12 +134,22 @@ while True:
         break
 
 print(f"Total repos fetched: {len(repos_raw)}")
+if OWNER:
+    repos_raw = [
+        r for r in repos_raw
+        if (r.get('owner') or {}).get('login', '').lower() == OWNER.lower()
+    ]
+    print(f"Repos for owner {OWNER}: {len(repos_raw)}")
 
 # ─── Step 2: Normalize repo data ───
 repos = []
 for r in repos_raw:
+    owner = (r.get('owner') or {}).get('login') or OWNER or ''
     repo = {
         'name': r.get('name'),
+        'repo_name': r.get('name'),
+        'owner': owner,
+        'full_name': r.get('full_name') or f"{owner}/{r.get('name')}",
         'description': r.get('description'),
         'url': r.get('html_url', ''),
         'homepageUrl': r.get('homepage', ''),
@@ -167,15 +185,15 @@ for repo in repos:
 
 # ─── Step 4: Fetch recent commit + README for each repo ───
 # Support --fast flag to skip commit/README fetching (use cached data)
-FAST_MODE = '--fast' in sys.argv
+FAST_MODE = args.fast
 
 if FAST_MODE and os.path.exists(CACHE_FILE):
     print("⚡ Fast mode: loading commits/READMEs from cache...")
     try:
         with open(CACHE_FILE, 'r') as f:
-            cached_repos = {r['name']: r for r in json.load(f)}
+            cached_repos = {(r.get('full_name') or r['name']): r for r in json.load(f)}
         for repo in repos:
-            cached = cached_repos.get(repo['name'])
+            cached = cached_repos.get(repo['full_name']) or cached_repos.get(repo['name'])
             if cached:
                 repo['last_commit_sha'] = cached.get('last_commit_sha')
                 repo['last_commit_msg'] = cached.get('last_commit_msg')
@@ -194,8 +212,7 @@ if FAST_MODE and os.path.exists(CACHE_FILE):
 if not FAST_MODE:
     print("🔄 Fetching commits and READMEs...")
     for i, repo in enumerate(repos):
-        name = repo['name']
-        full_name = f"repos/sigco3111/{name}"
+        full_name = f"repos/{repo['full_name']}"
 
         # Fetch latest commit
         commit_data = run_gh_json([f"{full_name}/commits?per_page=1"])
@@ -250,6 +267,9 @@ for repo in repos:
             repo['suggested_category'] = suggested
         new_repos.append({
             'name': repo['name'],
+            'repo_name': repo.get('repo_name'),
+            'owner': repo.get('owner'),
+            'full_name': repo.get('full_name'),
             'description': repo.get('description'),
             'url': repo['url'],
             'suggested_category': repo['suggested_category'],
@@ -276,11 +296,101 @@ for repo in repos:
 # Sort by category then stars
 repos.sort(key=lambda r: (r['category'], -(r['stargazerCount'] or 0), r['name']))
 
+LANGUAGE_COLORS = {
+    'TypeScript': '#3178c6',
+    'JavaScript': '#f7df1e',
+    'Python': '#3776ab',
+    'Swift': '#f05138',
+    'CSS': '#663399',
+    'HTML': '#e34c26',
+}
+
+def graph_node(repo, idx):
+    stars = repo.get('stargazerCount') or 0
+    size = min(22, 8 + stars * 2 + (2 if repo.get('new_repo') else 0))
+    language = repo.get('language') or repo.get('visibility') or 'Repository'
+    return {
+        **repo,
+        'id': idx,
+        'title': repo['name'],
+        'display_name': repo['full_name'],
+        'entity_type': language,
+        'size': size,
+        'color': LANGUAGE_COLORS.get(repo.get('language'), '#60a5fa'),
+        'date': repo.get('pushed_at') or repo.get('updatedAt') or repo.get('createdAt'),
+        'is_entity': repo.get('isPrivate', False),
+    }
+
+graph_nodes = [graph_node(repo, idx) for idx, repo in enumerate(repos)]
+
+STOPWORDS = {
+    'app', 'api', 'web', 'test', 'demo', 'main', 'code', 'data', 'repo',
+    'with', 'for', 'the', 'and', 'new', 'old', 'version', 'project',
+}
+
+def repo_tokens(repo):
+    text = f"{repo.get('name') or ''} {repo.get('description') or ''}".lower()
+    return {
+        token for token in re.split(r'[^a-z0-9]+', text)
+        if len(token) >= 3 and token not in STOPWORDS
+    }
+
+def build_graph_links(nodes, max_degree=5, max_links=650):
+    token_sets = [repo_tokens(node) for node in nodes]
+    candidates = []
+
+    # ponytail: O(n^2) is fine for a few hundred repos; index tokens if this grows past a few thousand.
+    for i in range(len(nodes)):
+        for j in range(i + 1, len(nodes)):
+            a, b = nodes[i], nodes[j]
+            score = 0
+            link_type = 'same_category'
+
+            if a.get('category') == b.get('category'):
+                score += 2
+            if a.get('language') and a.get('language') == b.get('language'):
+                score += 1
+
+            shared_topics = set(a.get('topics') or []) & set(b.get('topics') or [])
+            if shared_topics:
+                score += min(6, len(shared_topics) * 3)
+                link_type = 'mentions'
+
+            shared_words = token_sets[i] & token_sets[j]
+            if shared_words:
+                score += min(3, len(shared_words))
+                link_type = 'co_occurrence'
+
+            if score >= 3:
+                candidates.append((-score, i, j, link_type))
+
+    degree = [0] * len(nodes)
+    links = []
+    for neg_score, source, target, link_type in sorted(candidates):
+        if degree[source] >= max_degree or degree[target] >= max_degree:
+            continue
+        links.append({
+            'source': source,
+            'target': target,
+            'type': link_type,
+            'weight': -neg_score,
+        })
+        degree[source] += 1
+        degree[target] += 1
+        if len(links) >= max_links:
+            break
+    return links
+
+graph_links = build_graph_links(graph_nodes)
+
 # ─── Step 7: Save cache ───
 cache_data = []
 for repo in repos:
     cache_data.append({
         'name': repo['name'],
+        'repo_name': repo.get('repo_name'),
+        'owner': repo.get('owner'),
+        'full_name': repo.get('full_name'),
         'description': repo.get('description'),
         'url': repo['url'],
         'homepageUrl': repo.get('homepageUrl'),
@@ -294,19 +404,19 @@ for repo in repos:
         'category': repo['category'],
     })
 
-with open(CACHE_FILE, 'w') as f:
+with open(CACHE_FILE, 'w', encoding='utf-8') as f:
     json.dump(cache_data, f, ensure_ascii=False)
 print(f"💾 Cache saved: {CACHE_FILE}")
 
 # Save new repos list
-with open(NEW_REPOS_FILE, 'w') as f:
+with open(NEW_REPOS_FILE, 'w', encoding='utf-8') as f:
     json.dump(new_repos, f, ensure_ascii=False, indent=2)
 print(f"💾 New repos saved: {NEW_REPOS_FILE}")
 
 # ─── Step 8: Build output HTML ───
 print("🏗️ Building dashboard HTML...")
 
-with open(TEMPLATE, 'r') as f:
+with open(TEMPLATE, 'r', encoding='utf-8') as f:
     html = f.read()
 
 if '__REPOS_PLACEHOLDER__' not in html:
@@ -314,18 +424,29 @@ if '__REPOS_PLACEHOLDER__' not in html:
     sys.exit(1)
 
 # Use separators to minimize JSON (no newlines that could break inline JS)
-repos_json = json.dumps(repos, ensure_ascii=False, separators=(',', ':'))
+repos_json = json.dumps(graph_nodes, ensure_ascii=False, separators=(',', ':'))
+links_json = json.dumps(graph_links, ensure_ascii=False, separators=(',', ':'))
 html = html.replace('__REPOS_PLACEHOLDER__', repos_json)
+html = re.sub(
+    r'const links = \[.*?\];',
+    f'const links = {links_json};',
+    html,
+    count=1,
+    flags=re.DOTALL,
+)
 
 # Inject build timestamp
 build_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 html = html.replace('__BUILD_TIME__', build_time)
+html = re.sub(r'<span>📊 노드 \d+개</span>', f'<span>📊 노드 {len(graph_nodes)}개</span>', html, count=1)
+html = re.sub(r'<span>🔗 연결 \d+개</span>', f'<span>🔗 연결 {len(graph_links)}개</span>', html, count=1)
+html = re.sub(r'<span>📅 \d{4}-\d{2}-\d{2}</span>', f'<span>📅 {datetime.now():%Y-%m-%d}</span>', html, count=1)
 
-with open(OUTPUT, 'w') as f:
+with open(OUTPUT, 'w', encoding='utf-8') as f:
     f.write(html)
 
 # Verify placeholder is gone
-with open(OUTPUT, 'r') as f:
+with open(OUTPUT, 'r', encoding='utf-8') as f:
     output = f.read()
 if '__REPOS_PLACEHOLDER__' in output:
     print("ERROR: Placeholder still present in output!")
@@ -333,7 +454,8 @@ if '__REPOS_PLACEHOLDER__' in output:
 
 print(f"✅ Built: {OUTPUT}")
 print(f"   Output size: {len(output):,} bytes")
-print(f"   Repos injected: {len(repos)}")
+print(f"   Repos injected: {len(graph_nodes)}")
+print(f"   Links injected: {len(graph_links)}")
 print(f"   New repos: {len(new_repos)}")
 print(f"   Stale repos: {sum(1 for r in repos if r.get('is_stale'))}")
 print("🎉 Done!")

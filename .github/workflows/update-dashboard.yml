@@ -4,7 +4,12 @@ on:
   schedule:
     # 매일 한국시간 09:00 (UTC 00:00) 자동 실행
     - cron: '0 0 * * *'
-  workflow_dispatch: # 수동 실행도 가능
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: GitHub owner login to include
+        required: false
+        default: dogebi
 
 permissions:
   contents: write
@@ -29,7 +34,8 @@ jobs:
       - name: Run build script (fast mode)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/build_github_repos.py --fast
+          GITHUB_REPO_OWNER: ${{ github.event.inputs.owner || github.repository_owner }}
+        run: python scripts/build_github_repos.py --fast --owner "$GITHUB_REPO_OWNER"
 
       - name: Check for changes
         id: changes

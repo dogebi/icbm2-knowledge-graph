@@ -267,8 +267,25 @@
         .attr("fill", d => d.color)
         .attr("opacity", d => d.is_entity ? 0.8 : 0.6);
     
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function repoLabel(d) {
+        return d.repo_name || d.name || d.title || "unknown";
+    }
+
+    function repoFullName(d) {
+        return d.full_name || d.display_name || (d.owner ? `${d.owner}/${repoLabel(d)}` : repoLabel(d));
+    }
+
     node.append("text")
-        .text(d => d.title.length > 15 ? d.title.substring(0, 15) + "…" : d.title)
+        .text(d => repoLabel(d).length > 15 ? repoLabel(d).substring(0, 15) + "..." : repoLabel(d))
         .attr("dy", d => d.size + 12);
     
     // 툴팁
@@ -291,17 +308,20 @@
         });
         
         let metaHtml = "";
-        if (d.date) metaHtml += `📅 {d.date}<br>`;
-        if (d.category) metaHtml += `📂 {d.category}<br>`;
-        if (d.ticker) metaHtml += `📊 {d.ticker}<br>`;
-        if (d.provider) metaHtml += `🏢 {d.provider}<br>`;
-        if (d.url) metaHtml += `<a href="{d.url}" target="_blank" style="color:#60a5fa">🔗 링크</a><br>`;
-        metaHtml += `🔗 {connections.length}개 연결`;
+        if (d.description) metaHtml += `Description: ${escapeHtml(d.description)}<br>`;
+        if (d.owner) metaHtml += `Owner: ${escapeHtml(d.owner)}<br>`;
+        if (d.language) metaHtml += `Language: ${escapeHtml(d.language)}<br>`;
+        if (d.visibility) metaHtml += `Visibility: ${escapeHtml(d.visibility)}<br>`;
+        if (d.default_branch) metaHtml += `Default branch: ${escapeHtml(d.default_branch)}<br>`;
+        if (d.date) metaHtml += `Last push: ${escapeHtml(d.date)}<br>`;
+        if (d.category) metaHtml += `Category: ${escapeHtml(d.category)}<br>`;
+        metaHtml += `Connections: ${connections.length}<br>`;
+        if (d.url) metaHtml += `<a href="${escapeHtml(d.url)}" target="_blank" rel="noopener" style="color:#60a5fa">Open on GitHub</a>`;
         
         tooltip.html(`
-            <div class="tt-type" style="background:{d.color}33;color:{d.color}">{d.entity_type}</div>
-            <div class="tt-title">{d.title}</div>
-            <div class="tt-meta">{metaHtml}</div>
+            <div class="tt-type" style="background:${escapeHtml(d.color)}33;color:${escapeHtml(d.color)}">${escapeHtml(d.entity_type)}</div>
+            <div class="tt-title">${escapeHtml(repoFullName(d))}</div>
+            <div class="tt-meta">${metaHtml}</div>
         `)
         .style("left", (event.pageX + 15) + "px")
         .style("top", (event.pageY - 10) + "px")
@@ -313,7 +333,7 @@
         link.classed("dimmed", false);
     })
     .on("click", function(event, d) {
-        if (d.url) window.open(d.url, "_blank");
+        if (d.url) window.open(d.url, "_blank", "noopener");
     });
     
     // 검색
@@ -328,9 +348,16 @@
         
         const matchedIds = new Set();
         nodes.forEach(n => {
-            if (n.title.toLowerCase().includes(query) || 
-                n.entity_type.toLowerCase().includes(query) ||
-                (n.category && n.category.toLowerCase().includes(query))) {
+            const searchable = [
+                repoLabel(n),
+                repoFullName(n),
+                n.entity_type,
+                n.category,
+                n.description,
+                n.language,
+                n.visibility,
+            ].filter(Boolean).join(" ").toLowerCase();
+            if (searchable.includes(query)) {
                 matchedIds.add(n.id);
             }
         });

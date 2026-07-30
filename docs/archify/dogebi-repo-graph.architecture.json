@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Dogebi GitHub Repo Graph Architecture",
+    "subtitle": "GitHub API data is compiled into static D3 HTML and served locally",
+    "output": "dogebi-repo-graph-architecture.html",
+    "animation": "trace",
+    "viewBox": [1120, 720]
+  },
+  "components": [
+    { "id": "operator", "type": "external", "label": "Operator", "sublabel": "PowerShell / browser", "pos": [40, 310], "size": [130, 62] },
+    { "id": "builder", "type": "backend", "label": "Build Script", "sublabel": "build_github_repos.py", "pos": [250, 310], "size": [150, 62], "tag": "--fast" },
+    { "id": "github", "type": "external", "label": "GitHub API", "sublabel": "gh api user/repos", "pos": [250, 120], "size": [150, 62] },
+    { "id": "cache", "type": "database", "label": "Repo Cache", "sublabel": "github_repos_cache.json", "pos": [250, 500], "size": [150, 62] },
+    { "id": "newrepos", "type": "database", "label": "New Repo List", "sublabel": "github_repos_new.json", "pos": [450, 500], "size": [150, 62] },
+    { "id": "template", "type": "frontend", "label": "HTML Template", "sublabel": "github-repos-template.html", "pos": [470, 210], "size": [160, 62] },
+    { "id": "graphlogic", "type": "backend", "label": "Graph Builder", "sublabel": "categories + similarity links", "pos": [470, 310], "size": [160, 62] },
+    { "id": "dashboard", "type": "frontend", "label": "Generated Dashboard", "sublabel": "dashboard/github-repos.html", "pos": [690, 310], "size": [170, 62] },
+    { "id": "root", "type": "frontend", "label": "Root Page", "sublabel": "index.html", "pos": [690, 430], "size": [170, 62] },
+    { "id": "server", "type": "cloud", "label": "Local Static Server", "sublabel": "127.0.0.1:8020", "pos": [900, 430], "size": [160, 62] },
+    { "id": "browser", "type": "frontend", "label": "Browser + D3", "sublabel": "force graph render", "pos": [900, 310], "size": [160, 62] },
+    { "id": "actions", "type": "cloud", "label": "GitHub Actions", "sublabel": "scheduled fast build", "pos": [690, 120], "size": [170, 62] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Local static graph workspace", "wraps": ["builder", "cache", "newrepos", "template", "graphlogic", "dashboard", "root", "server", "browser"] },
+    { "kind": "security-group", "label": "External network calls", "wraps": ["github", "actions"] }
+  ],
+  "connections": [
+    { "from": "operator", "to": "builder", "label": "run build", "variant": "emphasis" },
+    { "from": "builder", "to": "github", "label": "repo pages", "variant": "security", "fromSide": "top", "toSide": "bottom", "route": "orthogonal-v", "labelDy": -12 },
+    { "from": "github", "to": "builder", "label": "REST JSON", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelDy": 20 },
+    { "from": "builder", "to": "cache", "label": "read/write", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelDy": 20 },
+    { "from": "builder", "to": "graphlogic", "variant": "emphasis" },
+    { "from": "template", "to": "graphlogic", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v" },
+    { "from": "graphlogic", "to": "newrepos", "label": "new list", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelDy": 20 },
+    { "from": "graphlogic", "to": "dashboard", "label": "embed graph", "variant": "emphasis", "labelAt": [660, 386] },
+    { "from": "dashboard", "to": "root", "label": "copy for /", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v", "labelDy": 20 },
+    { "from": "root", "to": "server", "variant": "emphasis" },
+    { "from": "server", "to": "browser", "label": "HTTP 200", "variant": "emphasis", "fromSide": "top", "toSide": "right", "route": "orthogonal-v", "labelAt": [1020, 386] },
+    { "from": "actions", "to": "builder", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Active runtime",
+      "items": [
+        "Browser renders embedded JSON with D3.js",
+        "No backend API is called after page load",
+        "Local server only serves static files"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Generated graph",
+      "items": [
+        "Nodes are GitHub repositories",
+        "Links are metadata similarity scores",
+        "Categories come from explicit maps and keyword fallback"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Current mismatch",
+      "items": [
+        "Original README and template still mention ICBM2 data",
+        "Legend is still mostly static template content",
+        "Origin remote still points to sigco3111"
+      ]
+    }
+  ]
+}

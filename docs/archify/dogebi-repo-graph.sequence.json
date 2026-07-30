@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Dogebi Repo Graph Build And Render Sequence",
+    "subtitle": "From PowerShell build command to D3 force graph in the browser",
+    "output": "dogebi-repo-graph-sequence.html",
+    "animation": "trace",
+    "viewBox": [1080, 860]
+  },
+  "participants": [
+    { "id": "operator", "type": "external", "label": "Operator", "sublabel": "PowerShell" },
+    { "id": "builder", "type": "backend", "label": "Builder", "sublabel": "build_github_repos.py" },
+    { "id": "github", "type": "external", "label": "GitHub API", "sublabel": "gh api" },
+    { "id": "cache", "type": "database", "label": "Data Files", "sublabel": "cache + new repos" },
+    { "id": "graph", "type": "backend", "label": "Graph Logic", "sublabel": "category + links" },
+    { "id": "template", "type": "frontend", "label": "Template", "sublabel": "HTML + D3 runtime" },
+    { "id": "html", "type": "frontend", "label": "Static HTML", "sublabel": "dashboard + index" },
+    { "id": "server", "type": "cloud", "label": "Static Server", "sublabel": "127.0.0.1:8020" },
+    { "id": "browser", "type": "frontend", "label": "Browser", "sublabel": "D3 graph" }
+  ],
+  "segments": [
+    { "from": 150, "to": 352, "label": "Build input" },
+    { "from": 370, "to": 600, "label": "Compile static graph" },
+    { "from": 620, "to": 760, "label": "Serve and render" }
+  ],
+  "messages": [
+    { "from": "operator", "to": "builder", "y": 185, "label": "python build --fast", "variant": "emphasis" },
+    { "from": "builder", "to": "github", "y": 228, "label": "GET user/repos pages", "variant": "security" },
+    { "from": "github", "to": "builder", "y": 272, "label": "261 repo records", "variant": "return" },
+    { "from": "builder", "to": "cache", "y": 318, "label": "load cached details", "variant": "default" },
+    { "from": "cache", "to": "builder", "y": 350, "label": "commit/README cache", "variant": "return" },
+    { "from": "builder", "to": "graph", "y": 405, "label": "assign categories", "variant": "default", "note": "CATEGORY_MAP first, keyword fallback second" },
+    { "from": "graph", "to": "builder", "y": 455, "label": "261 nodes + 324 links", "variant": "return", "note": "same category, language, topics, shared keywords" },
+    { "from": "builder", "to": "template", "y": 505, "label": "read template", "variant": "default" },
+    { "from": "template", "to": "builder", "y": 538, "label": "HTML shell", "variant": "return" },
+    { "from": "builder", "to": "html", "y": 585, "label": "write dashboard HTML", "variant": "emphasis" },
+    { "from": "operator", "to": "html", "y": 632, "label": "copy to index.html", "variant": "dashed" },
+    { "from": "browser", "to": "server", "y": 675, "label": "GET /", "variant": "emphasis" },
+    { "from": "server", "to": "browser", "y": 718, "label": "200 index.html", "variant": "return", "note": "D3 renders 261 nodes and 324 links from embedded arrays" }
+  ],
+  "activations": [
+    { "participant": "builder", "from": 180, "to": 602, "type": "backend" },
+    { "participant": "github", "from": 222, "to": 280, "type": "external" },
+    { "participant": "cache", "from": 312, "to": 358, "type": "database" },
+    { "participant": "graph", "from": 400, "to": 462, "type": "backend" },
+    { "participant": "template", "from": 500, "to": 544, "type": "frontend" },
+    { "participant": "html", "from": 580, "to": 640, "type": "frontend" },
+    { "participant": "server", "from": 670, "to": 724, "type": "cloud" },
+    { "participant": "browser", "from": 672, "to": 780, "type": "frontend" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Why --fast is fast",
+      "items": [
+        "Repo list still comes from GitHub",
+        "Commit and README details are reused from cache",
+        "No per-repo README API loop runs"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Graph semantics",
+      "items": [
+        "Links are similarity edges",
+        "They are not import or dependency edges",
+        "Each node is capped to five rendered links"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Runtime boundary",
+      "items": [
+        "After HTML generation, the app is static",
+        "D3 uses embedded arrays, not a live backend",
+        "The local server only returns files"
+      ]
+    }
+  ]
+}
